@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>锁序解剖室</title>
+<style>
+  :root {
+    --bg:#0f1216; --panel:#171c23; --ink:#e6ebf2; --muted:#8b97a8;
+    --accent:#5ab0ff; --hold:#3fb27f; --wait:#e0a13a; --bad:#ef6a6a;
+    --line:#26303d;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+    font:13px/1.5 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif; }
+  header { padding:12px 18px; border-bottom:1px solid var(--line);
+    display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+  header h1 { font-size:17px; margin:0; letter-spacing:1px; }
+  header .sub { color:var(--muted); font-size:12px; }
+  button, select, input { background:#1d242e; color:var(--ink);
+    border:1px solid var(--line); border-radius:6px; padding:5px 10px;
+    font-size:12px; cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  .layout { display:grid; grid-template-columns: 320px 1fr 380px;
+    gap:10px; padding:10px; }
+  .panel { background:var(--panel); border:1px solid var(--line);
+    border-radius:10px; padding:10px 12px; }
+  .panel h2 { font-size:13px; margin:0 0 8px; color:var(--accent); }
+  #sliderRow { display:flex; gap:8px; align-items:center; margin:6px 0 10px; }
+  #timeSlider { flex:1; }
+  #graph { min-height:320px; }
+  svg text { fill:var(--ink); font-size:11px; }
+  .lane { border-bottom:1px dashed var(--line); padding:4px 0; }
+  .lane .tid { color:var(--muted); font-weight:600; margin-bottom:3px; }
+  .ev { display:inline-block; padding:1px 6px; margin:1px 2px;
+    border-radius:4px; font-size:11px; border:1px solid var(--line);
+    background:#10151c; }
+  .ev.request { border-color:var(--wait); color:var(--wait); }
+  .ev.acquired { border-color:var(--hold); color:var(--hold); }
+  .ev.release { border-color:#6c7d92; color:#9fb0c3; }
+  .ev.cond_wait, .ev.cond_notify, .ev.cond_notify_all { border-color:#b07df0; color:#c49bf5; }
+  .ev.timeout { border-color:var(--bad); color:var(--bad); }
+  .ev.late::after { content:" ⚠"; color:var(--bad); }
+  .cycle { border:1px solid var(--bad); border-radius:8px; padding:8px;
+    margin-bottom:8px; background:#221416; }
+  .cycle .sig { color:var(--bad); font-weight:700; }
+  .step { margin:4px 0; padding-left:8px; border-left:2px solid var(--line); }
+  .stack { font-family:ui-monospace,monospace; color:var(--muted);
+    font-size:11px; white-space:pre-wrap; }
+  .anom { color:var(--wait); font-size:11px; margin:2px 0; }
+  .conf-high { color:var(--hold); } .conf-tentative { color:var(--wait); }
+  .row { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px; }
+  details summary { cursor:pointer; color:var(--muted); }
+  #compareOut { font-size:11px; }
+  .scroll { max-height:42vh; overflow:auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1>锁序解剖室</h1>
+  <span class="sub">持有图 · 等待图 · 环路证据 · 事件分支 · 最小复现</span>
+  <span style="flex:1"></span>
+  <select id="branchSel"></select>
+  <button onclick="loadSample()">载入演示轨迹</button>
+  <button onclick="openImport()">导入 JSON</button>
+  <input id="fileInput" type="file" accept=".json,application/json" style="display:none" />
+</header>
+
+<div class="layout">
+  <div class="panel">
+    <h2>线程泳道</h2>
+    <div id="sliderRow">
+      <span id="timeLabel" class="sub"></span>
+      <input id="timeSlider" type="range" min="0" max="0" value="0" />
+    </div>
+    <div id="lanes" class="scroll"></div>
+  </div>
+
+  <div class="panel">
+    <h2>持有图 / 等待图
+      <span id="confBadge" style="float:right"></span>
+    </h2>
+    <div id="graph"><svg id="graphSvg" width="100%" height="360"></svg></div>
+    <details><summary>异常与置信状态</summary><div id="anoms"></div></details>
+  </div>
+
+  <div class="panel">
+    <h2>环路证据</h2>
+    <div id="cycles" class="scroll"></div>
+    <h2 style="margin-top:12px">校正分支</h2>
+    <div class="row">
+      <input id="branchName" placeholder="新分支名" style="flex:1;min-width:90px" />
+      <input id="corrTarget" placeholder="事件id/seq" style="width:90px" />
+      <select id="corrType">
+        <option value="remove">删除</option>
+        <option value="update">改类型</option>
+        <option value="declare">锁声明</option>
+      </select>
+      <input id="corrValue" placeholder="如 acquired / rwlock" style="width:100px" />
+      <button onclick="createBranch()">建分支</button>
+    </div>
+    <div class="row">
+      <select id="cmpA"></select><select id="cmpB"></select>
+      <button onclick="compareBranches()">比较两个分支</button>
+    </div>
+    <div id="compareOut"></div>
+    <h2 style="margin-top:12px">最小复现片段</h2>
+    <div class="row">
+      <select id="cyclePick"></select>
+      <button onclick="minimizeTrace()">缩减并保留</button>
+    </div>
+    <div id="minOut" class="scroll"></div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
