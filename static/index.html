@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>锁序解剖室</title>
+<style>
+  body { font-family: -apple-system, "PingFang SC", sans-serif; margin: 0; background: #14161a; color: #dde1e6; }
+  header { padding: 12px 20px; background: #1d2127; border-bottom: 1px solid #2c313a; display: flex; align-items: center; gap: 16px; }
+  header h1 { font-size: 18px; margin: 0; color: #f0b429; }
+  header button, header select { background: #2c313a; color: #dde1e6; border: 1px solid #3d434d; border-radius: 4px; padding: 4px 10px; cursor: pointer; }
+  main { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px 20px; }
+  section { background: #1d2127; border: 1px solid #2c313a; border-radius: 6px; padding: 10px 14px; }
+  section h2 { font-size: 14px; margin: 0 0 8px; color: #8ab4f8; }
+  .wide { grid-column: 1 / 3; }
+  .lane { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
+  .lane .name { width: 44px; font-size: 12px; color: #9aa0a6; flex: none; }
+  .lane .track { display: flex; gap: 3px; flex-wrap: wrap; }
+  .ev { font-size: 10px; padding: 1px 5px; border-radius: 3px; background: #2c313a; cursor: default; }
+  .ev.acquire_success { background: #1e4620; } .ev.acquire_request { background: #4a3a12; }
+  .ev.release { background: #333; } .ev.cond_wait_start, .ev.cond_wait_end { background: #3b2a4d; }
+  .ev.notify, .ev.notify_all { background: #123a4a; } .ev.thread_end { background: #4d1f1f; }
+  .edge-row, .cycle-card { font-size: 12px; padding: 5px 8px; margin: 4px 0; background: #23272e; border-radius: 4px; cursor: pointer; }
+  .edge-row.uncertain, .cycle-card.uncertain { border-left: 3px solid #f0b429; }
+  .cycle-card { border-left: 3px solid #e5534b; cursor: default; }
+  .cycle-card pre { font-size: 11px; color: #9aa0a6; white-space: pre-wrap; margin: 4px 0 0; }
+  #sliderRow { display: flex; align-items: center; gap: 10px; font-size: 12px; }
+  #timeSlider { flex: 1; }
+  table { border-collapse: collapse; font-size: 12px; width: 100%; }
+  td, th { border: 1px solid #2c313a; padding: 3px 8px; text-align: left; }
+  .tag { font-size: 10px; padding: 0 4px; border-radius: 3px; background: #4a3a12; margin-left: 4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>锁序解剖室</h1>
+  <select id="branchSel"></select>
+  <select id="branchSelB"><option value="">比较分支…</option></select>
+  <button id="demoBtn">载入示例轨迹</button>
+  <button id="minBtn">缩减复现环</button>
+  <span id="status" style="font-size:12px;color:#9aa0a6"></span>
+</header>
+<main>
+  <section class="wide">
+    <h2>时间滑块</h2>
+    <div id="sliderRow">
+      <input type="range" id="timeSlider" min="0" max="100" value="100">
+      <span id="timeLabel">t = ∞</span>
+    </div>
+  </section>
+  <section class="wide">
+    <h2>线程泳道</h2>
+    <div id="lanes"></div>
+  </section>
+  <section>
+    <h2>等待图</h2>
+    <svg id="waitGraph" width="100%" height="260"></svg>
+    <div id="edgeList"></div>
+  </section>
+  <section>
+    <h2>持有图</h2>
+    <div id="holdList"></div>
+  </section>
+  <section>
+    <h2>环路证据</h2>
+    <div id="cycles"></div>
+  </section>
+  <section>
+    <h2>分支比较</h2>
+    <div id="compare">选择比较分支后展示差异。</div>
+  </section>
+  <section class="wide">
+    <h2>最小复现片段</h2>
+    <div id="minOut">点击“缩减复现环”生成仍复现同一环的最小事件片段。</div>
+  </section>
+</main>
+<script>
+let tMin = 0, tMax = 0, currentBranch = 0, lastEvents = [];
+const $ = id => document.getElementById(id);
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  return r.json();
+}
+
+function curT() {
+  const v = +$('timeSlider').value;
+  return v >= 100 ? Infinity : tMin + (tMax - tMin) * v / 100;
+}
+
+async function loadBranches() {
+  const d = await api('/api/branches');
+  for (const sel of [$('branchSel'), $('branchSelB')]) {
+    const keep = sel.value;
+    sel.innerHTML = sel.id === 'branchSelB' ? '<option value="">比较分支…</option>' : '';
+    for (const b of d.branches) {
+      const o = document.createElement('option');
+      o.value = b.id; o.textContent = '分支 ' + b.id + (b.note ? ' (' + b.note + ')' : '');
+      sel.appendChild(o);
+    }
+    sel.value = keep || (sel.id === 'branchSel' ? currentBranch : '');
+  }
+}
+
+async function loadTimeline() {
+  const d = await api('/api/timeline?branch=' + currentBranch);
+  lastEvents = d.events;
+  tMin = d.t_min; tMax = d.t_max;
+  const lanes = $('lanes');
+  lanes.innerHTML = '';
+  for (const th of d.threads) {
+    const row = document.createElement('div');
+    row.className = 'lane';
+    row.innerHTML = '<span class="name">' + th + '</span>';
+    const track = document.createElement('div');
+    track.className = 'track';
+    for (const e of d.events.filter(x => x.thread === th)) {
+      const c = document.createElement('span');
+      c.className = 'ev ' + e.type;
+      c.textContent = '#' + e.id + ' ' + e.type.replace('acquire_', '').replace('thread_', '') + (e.lock ? ' ' + e.lock : '');
+      c.title = JSON.stringify(e);
+      track.appendChild(c);
+    }
+    row.appendChild(track);
+    lanes.appendChild(row);
+  }
+}
+
+async function loadGraph() {
+  const t = curT();
+  $('timeLabel').textContent = t === Infinity ? 't = ∞' : 't = ' + t.toFixed(1);
+  const g = await api('/api/graph?branch=' + currentBranch + '&t=' + t);
+  const holds = $('holdList');
+  holds.innerHTML = g.holds.length ? '' : '无持有。';
+  for (const h of g.holds) {
+    const d = document.createElement('div');
+    d.className = 'edge-row' + (h.confidence === 'uncertain' ? ' uncertain' : '');
+    d.innerHTML = h.thread + ' 持有 ' + h.lock + ' (' + h.mode + '×' + h.depth + ', 事件#' + h.acquired_event + ')'
+      + (h.leaked ? '<span class="tag">缺release</span>' : '')
+      + (h.confidence === 'uncertain' ? '<span class="tag">不确定</span>' : '');
+    holds.appendChild(d);
+  }
+  const el = $('edgeList');
+  el.innerHTML = g.edges.length ? '' : '无等待边。';
+  for (const e of g.edges) {
+    const d = document.createElement('div');
+    d.className = 'edge-row' + (e.confidence === 'uncertain' ? ' uncertain' : '');
+    d.textContent = e.from + ' → ' + e.to + ' 等待 ' + e.lock + ' (' + e.wait_kind + ', 请求#' + e.wait_event + ' / 持有#' + e.hold_event + ')';
+    el.appendChild(d);
+  }
+  drawGraph(g.edges);
+  const c = await api('/api/cycles?branch=' + currentBranch + '&t=' + t);
+  const cyc = $('cycles');
+  cyc.innerHTML = c.cycles.length ? '' : '未检测到环。';
+  c.cycles.forEach((cy, i) => {
+    const d = document.createElement('div');
+    d.className = 'cycle-card';
+    let txt = '环 #' + i + '：线程 ' + cy.threads.join(' → ') + ' → ' + cy.threads[0] + '；锁 ' + cy.locks.join(', ');
+    txt += '\n' + cy.edges.map(e =>
+      e.waiter + ' 等待 ' + e.lock + ' (请求事件#' + e.wait_event + ')，被 ' + e.holder +
+      ' 持有 (事件#' + e.hold_event + '；持有栈 ' + e.held_stack.map(h => h.lock + '#' + h.event).join(', ') + ')'
+    ).join('\n');
+    d.innerHTML = '<b>死锁环</b><pre>' + txt + '</pre>';
+    cyc.appendChild(d);
+  });
+}
+
+function drawGraph(edges) {
+  const svg = $('waitGraph');
+  svg.innerHTML = '';
+  const nodes = [...new Set(edges.flatMap(e => [e.from, e.to]))];
+  const cx = 200, cy = 120, r = 90;
+  const pos = {};
+  nodes.forEach((n, i) => {
+    const a = 2 * Math.PI * i / nodes.length - Math.PI / 2;
+    pos[n] = [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+  });
+  const ns = 'http://www.w3.org/2000/svg';
+  for (const e of edges) {
+    const [x1, y1] = pos[e.from], [x2, y2] = pos[e.to];
+    const line = document.createElementNS(ns, 'line');
+    line.setAttribute('x1', x1); line.setAttribute('y1', y1);
+    line.setAttribute('x2', x2); line.setAttribute('y2', y2);
+    line.setAttribute('stroke', e.confidence === 'uncertain' ? '#f0b429' : '#e5534b');
+    line.setAttribute('stroke-width', '2'); line.setAttribute('marker-end', 'url(#arr)');
+    svg.appendChild(line);
+    const t = document.createElementNS(ns, 'text');
+    t.setAttribute('x', (x1 + x2) / 2); t.setAttribute('y', (y1 + y2) / 2 - 4);
+    t.setAttribute('fill', '#9aa0a6'); t.setAttribute('font-size', '10');
+    t.textContent = e.lock + ' #' + e.wait_event;
+    svg.appendChild(t);
+  }
+  for (const n of nodes) {
+    const [x, y] = pos[n];
+    const c = document.createElementNS(ns, 'circle');
+    c.setAttribute('cx', x); c.setAttribute('cy', y); c.setAttribute('r', '16');
+    c.setAttribute('fill', '#2c313a'); c.setAttribute('stroke', '#8ab4f8');
+    svg.appendChild(c);
+    const t = document.createElementNS(ns, 'text');
+    t.setAttribute('x', x); t.setAttribute('y', y + 4);
+    t.setAttribute('fill', '#dde1e6'); t.setAttribute('font-size', '11');
+    t.setAttribute('text-anchor', 'middle');
+    t.textContent = n;
+    svg.appendChild(t);
+  }
+}
+
+async function loadCompare() {
+  const b = $('branchSelB').value;
+  if (b === '') { $('compare').textContent = '选择比较分支后展示差异。'; return; }
+  const t = curT();
+  const d = await api('/api/compare?a=' + currentBranch + '&b=' + b + '&t=' + t);
+  $('compare').innerHTML =
+    '<div class="edge-row">分支 ' + d.a.branch + '：' + d.a.cycles.length + ' 个环</div>' +
+    '<div class="edge-row">分支 ' + d.b.branch + '：' + d.b.cycles.length + ' 个环</div>' +
+    '<div class="edge-row">仅 ' + d.a.branch + '：' + (d.only_a.length ? JSON.stringify(d.only_a) : '无') + '</div>' +
+    '<div class="edge-row">仅 ' + d.b.branch + '：' + (d.only_b.length ? JSON.stringify(d.only_b) : '无') + '</div>';
+}
+
+async function refreshAll() {
+  await loadBranches();
+  await loadTimeline();
+  await loadGraph();
+  await loadCompare();
+}
+
+$('demoBtn').onclick = async () => { await api('/api/demo', {method: 'POST'}); await refreshAll(); };
+$('branchSel').onchange = e => { currentBranch = +e.target.value; refreshAll(); };
+$('branchSelB').onchange = loadCompare;
+$('timeSlider').oninput = loadGraph;
+$('minBtn').onclick = async () => {
+  const t = curT();
+  const d = await api('/api/minimize', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({branch: currentBranch, t: t === Infinity ? 1e18 : t, cycle_index: 0})
+  });
+  if (d.ok) {
+    $('minOut').innerHTML = '从 ' + d.original_count + ' 个事件缩减到 ' + d.count + ' 个：<br>' +
+      d.events.map(e => '<span class="ev ' + e.type + '">#' + e.id + ' ' + (e.thread||'') + ' ' + e.type + (e.lock ? ' ' + e.lock : '') + '</span>').join(' ');
+  } else {
+    $('minOut').textContent = '当前时点没有可缩减的环。';
+  }
+};
+refreshAll();
+</script>
+</body>
+</html>
