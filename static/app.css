@@ -1,0 +1,117 @@
+:root {
+  color-scheme: dark;
+  font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: #10131a;
+  color: #e9eef7;
+}
+body { margin: 0; }
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 18px 24px;
+  background: linear-gradient(120deg, #182235, #10131a);
+  border-bottom: 1px solid #2a3448;
+}
+h1 { margin: 0; font-size: 28px; }
+h1::after { content: " / Lock Order Lab"; color: #76a9ff; font-size: 14px; margin-left: 10px; }
+.topbar p { margin: 6px 0 0; color: #91a0b7; }
+.toolbar, .row, .grid2, .grid3 { display: flex; gap: 8px; }
+button, select, input, textarea {
+  background: #171d28;
+  color: #e9eef7;
+  border: 1px solid #344156;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+button { cursor: pointer; }
+button:hover { border-color: #76a9ff; }
+.layout {
+  display: grid;
+  grid-template-columns: 330px 1fr 1.1fr;
+  gap: 14px;
+  padding: 14px;
+}
+.panel {
+  background: #151a24;
+  border: 1px solid #2a3448;
+  border-radius: 14px;
+  padding: 14px;
+  min-height: calc(100vh - 120px);
+}
+h2 { font-size: 16px; margin: 12px 0 8px; color: #bcd2ff; }
+h3 { font-size: 14px; }
+textarea { width: 100%; height: 210px; box-sizing: border-box; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+input { min-width: 0; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; margin: 6px 0; }
+.grid3 { display: grid; grid-template-columns: 1.2fr 1fr 86px; margin: 6px 0; }
+.section-title { display: flex; justify-content: space-between; align-items: center; }
+#timeSlider { width: 100%; margin: 14px 0 4px; }
+#timeLabel { color: #91a0b7; font-size: 13px; margin-bottom: 12px; }
+.lane {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.lane-title { color: #bcd2ff; font-weight: 700; }
+.lane-track {
+  position: relative;
+  height: 34px;
+  background: #10141d;
+  border: 1px solid #2a3448;
+  border-radius: 18px;
+}
+.event-chip {
+  position: absolute;
+  top: 5px;
+  transform: translateX(-50%);
+  padding: 3px 7px;
+  border-radius: 11px;
+  font-size: 11px;
+  border: 1px solid #50617d;
+  background: #222c3d;
+  white-space: nowrap;
+}
+.event-chip.request { border-color: #e0b34d; }
+.event-chip.success { border-color: #67d18a; }
+.event-chip.release { border-color: #7aa7e8; }
+.event-chip.cond { border-color: #c58bff; }
+.event-chip.end, .event-chip.start { border-color: #8794aa; }
+.event-chip.cancel { border-color: #ff7777; }
+.event-list { max-height: 180px; overflow: auto; font-size: 12px; }
+.event-row { display: grid; grid-template-columns: 70px 50px 1fr; gap: 8px; padding: 5px; border-bottom: 1px solid #242d3d; }
+.event-row.active { background: #21304a; }
+.graph-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.graph { min-height: 170px; border: 1px solid #2a3448; border-radius: 10px; padding: 10px; background: #10141d; }
+.edge {
+  padding: 8px;
+  margin: 6px 0;
+  border-left: 3px solid #76a9ff;
+  background: #172031;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.edge.waits_for { border-color: #ffcc66; }
+.edge.condition_wait { border-color: #c58bff; }
+.edge.candidate { opacity: 0.78; }
+.muted { color: #8794aa; }
+.cycles:empty::before, .anomalies:empty::before, .graph:empty::after { content: "暂无"; color: #738098; }
+.cycle-card, .anomaly-card {
+  border: 1px solid #65562f;
+  background: #211d14;
+  border-radius: 10px;
+  padding: 10px;
+  margin: 8px 0;
+}
+.cycle-card { border-color: #8c5a2b; }
+.anomaly-card.high { border-color: #a94444; background: #2a1717; }
+.anomaly-card.medium { border-color: #a78135; background: #251f14; }
+.stack { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; color: #ffd88c; margin: 6px 0; }
+.status { margin-top: 10px; color: #91a0b7; font-size: 12px; white-space: pre-wrap; }
+.confidence-high { color: #67d18a; }
+.confidence-candidate, .confidence-low { color: #ffcc66; }
+dialog { background: #151a24; color: #e9eef7; border: 1px solid #344156; border-radius: 14px; width: min(820px, 90vw); }
+pre { background: #10141d; border-radius: 8px; padding: 10px; max-height: 60vh; overflow: auto; }
+@media (max-width: 1100px) { .layout { grid-template-columns: 1fr; } .panel { min-height: auto; } }

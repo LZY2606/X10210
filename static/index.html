@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>锁序解剖室</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>锁序解剖室</h1>
+      <p>按采集代次复盘持有图、等待图、条件变量与环路证据</p>
+    </div>
+    <div class="toolbar">
+      <select id="branchSelect"></select>
+      <button id="loadSample">载入死锁样例</button>
+      <button id="importEvents">导入</button>
+      <button id="compareBtn">比较分支</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="panel input-panel">
+      <h2>事件导入</h2>
+      <textarea id="eventInput" spellcheck="false" placeholder="粘贴 JSON 事件数组，或先载入样例"></textarea>
+      <div class="row">
+        <button id="appendInput">流式追加</button>
+        <button id="replaceInput">替换主干</button>
+      </div>
+      <h2>锁类型声明</h2>
+      <div class="grid3">
+        <input id="typeLock" placeholder="锁地址">
+        <select id="typeKind">
+          <option>reentrant</option>
+          <option>mutex</option>
+          <option>rwlock</option>
+        </select>
+        <button id="declareType">声明</button>
+      </div>
+      <h2>事件校正</h2>
+      <div class="grid2">
+        <input id="correctId" placeholder="事件 ID">
+        <input id="correctPatch" placeholder='{"timestamp":7.5}'>
+      </div>
+      <div class="grid2">
+        <input id="correctBranch" placeholder="新分支 ID">
+        <button id="correctBtn">形成新分支</button>
+      </div>
+      <div id="status" class="status"></div>
+    </section>
+
+    <section class="panel timeline-panel">
+      <div class="section-title">
+        <h2>线程泳道</h2>
+        <div><span id="confidence"></span> <button id="reduceBtn">缩减为最小复现</button></div>
+      </div>
+      <input id="timeSlider" type="range" min="0" step="1">
+      <div id="timeLabel"></div>
+      <div id="swimlanes"></div>
+      <h2>候选事件顺序</h2>
+      <div id="eventList" class="event-list"></div>
+    </section>
+
+    <section class="panel graph-panel">
+      <h2>当前持有图与等待图</h2>
+      <div class="graph-grid">
+        <div>
+          <h3>持有图</h3>
+          <div id="holdGraph" class="graph"></div>
+        </div>
+        <div>
+          <h3>等待图</h3>
+          <div id="waitGraph" class="graph"></div>
+        </div>
+      </div>
+      <h2>环路证据</h2>
+      <div id="cycles" class="cycles"></div>
+      <h2>异常与置信状态</h2>
+      <div id="anomalies" class="anomalies"></div>
+    </section>
+  </main>
+
+  <dialog id="compareDialog">
+    <h2>分支比较</h2>
+    <select id="compareSelect"></select>
+    <pre id="compareOutput"></pre>
+    <button id="closeCompare">关闭</button>
+  </dialog>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
