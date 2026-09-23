@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>锁序解剖室</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>锁序解剖室</h1>
+    <div class="toolbar">
+      <select id="branchSelect"></select>
+      <button id="loadSampleBtn">载入示例轨迹</button>
+      <button id="importBtn">导入 JSON</button>
+      <input type="file" id="importFile" accept="application/json,.json" hidden />
+      <button id="newBranchBtn">从校正新建分支</button>
+      <button id="compareBtn">与主分支比较</button>
+      <button id="minimizeBtn">最小化环片段</button>
+    </div>
+  </header>
+
+  <section class="timeline-bar">
+    <label>时间滑块 <span id="timeLabel">—</span></label>
+    <input type="range" id="timeSlider" min="0" max="100" value="100" step="1" />
+    <label class="gen-label">代次 <select id="genSelect"><option value="">全部</option></select></label>
+    <span id="replayInfo" class="muted"></span>
+  </section>
+
+  <main class="grid">
+    <section class="panel span2">
+      <h2>线程泳道</h2>
+      <div id="swimlanes"></div>
+    </section>
+
+    <section class="panel">
+      <h2>持有图</h2>
+      <svg id="heldGraph" viewBox="0 0 420 300"></svg>
+    </section>
+    <section class="panel">
+      <h2>等待图（时间点）</h2>
+      <svg id="waitGraph" viewBox="0 0 420 300"></svg>
+    </section>
+
+    <section class="panel span2">
+      <h2>环路证据</h2>
+      <div id="cycleEvidence" class="evidence"><p class="muted">当前时点未检测到环。</p></div>
+    </section>
+
+    <section class="panel">
+      <h2>事故区间</h2>
+      <div id="incidents"></div>
+    </section>
+    <section class="panel">
+      <h2>边 / 事件溯源</h2>
+      <div id="edgeDetail" class="muted"><p>点击图中的边或泳道中的事件可回溯。</p></div>
+    </section>
+
+    <section class="panel span2" id="comparePanel" hidden>
+      <h2>分支比较</h2>
+      <div id="compareResult"></div>
+    </section>
+    <section class="panel span2" id="minimizePanel" hidden>
+      <h2>最小复现片段</h2>
+      <div id="minimizeResult"></div>
+    </section>
+  </main>
+
+  <dialog id="correctionDialog">
+    <form method="dialog" class="dialog-body">
+      <h3>新建事件校正</h3>
+      <label>分支名 <input id="corrName" value="校正分支" /></label>
+      <label>操作
+        <select id="corrOp">
+          <option value="edit_event">修改事件</option>
+          <option value="delete_event">删除事件</option>
+          <option value="insert_event">插入事件</option>
+          <option value="set_lock_type">声明锁类型</option>
+        </select>
+      </label>
+      <label>目标 seq <input id="corrSeq" type="number" /></label>
+      <label>JSON 载荷
+        <textarea id="corrPayload" rows="8"></textarea>
+      </label>
+      <menu>
+        <button value="cancel">取消</button>
+        <button id="corrSubmit" value="default">提交</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
