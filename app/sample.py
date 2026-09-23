@@ -1,0 +1,28 @@
+"""Built-in demonstration trace: classic A->B / B->A deadlock with stacks."""
+
+SAMPLE_EVENTS = [
+    {"seq": 1, "gen": "pid-100", "ts": 100, "kind": "thread_start",
+     "thread": "worker-1", "stack": ["main", "spawn worker-1"]},
+    {"seq": 2, "gen": "pid-100", "ts": 110, "kind": "thread_start",
+     "thread": "worker-2", "stack": ["main", "spawn worker-2"]},
+    {"seq": 3, "gen": "pid-100", "ts": 200, "kind": "acquire",
+     "thread": "worker-1", "lock": "0x7fA0",
+     "stack": ["worker", "load_config", "pthread_mutex_lock(0x7fA0)"]},
+    {"seq": 4, "gen": "pid-100", "ts": 201, "kind": "acquire_ok",
+     "thread": "worker-1", "lock": "0x7fA0",
+     "stack": ["worker", "load_config", "pthread_mutex_lock(0x7fA0)"]},
+    {"seq": 5, "gen": "pid-100", "ts": 210, "kind": "acquire",
+     "thread": "worker-2", "lock": "0x7fB0",
+     "stack": ["worker", "flush_cache", "pthread_mutex_lock(0x7fB0)"]},
+    {"seq": 6, "gen": "pid-100", "ts": 211, "kind": "acquire_ok",
+     "thread": "worker-2", "lock": "0x7fB0",
+     "stack": ["worker", "flush_cache", "pthread_mutex_lock(0x7fB0)"]},
+    {"seq": 7, "gen": "pid-100", "ts": 300, "kind": "acquire",
+     "thread": "worker-1", "lock": "0x7fB0",
+     "stack": ["worker", "load_config", "update_index",
+               "pthread_mutex_lock(0x7fB0)"]},
+    {"seq": 8, "gen": "pid-100", "ts": 310, "kind": "acquire",
+     "thread": "worker-2", "lock": "0x7fA0",
+     "stack": ["worker", "flush_cache", "reload_config",
+               "pthread_mutex_lock(0x7fA0)"]},
+]
