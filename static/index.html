@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>锁序解剖室</title>
+<style>
+  :root {
+    --bg: #0f1420; --panel: #18202e; --line: #2a3550;
+    --text: #dce4f2; --muted: #8593ad; --accent: #5eead4;
+    --danger: #f87171; --warn: #fbbf24; --blue: #7dd3fc;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 13px/1.5 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  header { padding: 14px 22px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: baseline; gap: 14px; }
+  header h1 { margin: 0; font-size: 20px; color: var(--accent); }
+  header span { color: var(--muted); }
+  main { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 14px 22px 40px; }
+  section.card { background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 12px 14px; }
+  section.wide { grid-column: 1 / -1; }
+  h2 { margin: 0 0 10px; font-size: 14px; color: var(--blue); }
+  label { color: var(--muted); margin-right: 6px; }
+  select, input, textarea, button {
+    background: #0d1320; color: var(--text); border: 1px solid var(--line);
+    border-radius: 6px; padding: 5px 8px; font: inherit; }
+  textarea { width: 100%; height: 90px; resize: vertical;
+    font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .muted { color: var(--muted); }
+  svg { width: 100%; display: block; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; }
+  th, td { border-bottom: 1px solid var(--line); padding: 4px 6px; text-align: left;
+    vertical-align: top; }
+  th { color: var(--muted); font-weight: normal; }
+  .ev { font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
+  .cycle { border: 1px solid var(--danger); border-radius: 8px; padding: 8px 10px;
+    margin-bottom: 8px; background: rgba(248,113,113,.07); }
+  .cycle h3 { margin: 0 0 6px; font-size: 13px; color: var(--danger); }
+  .tag { display: inline-block; padding: 0 6px; border-radius: 10px;
+    background: #24304a; margin-right: 4px; font-size: 11px; }
+  .tag.suspect { background: rgba(251,191,36,.2); color: var(--warn); }
+  .tag.leaked { background: rgba(248,113,113,.2); color: var(--danger); }
+  .tag.certain { background: rgba(94,234,212,.15); color: var(--accent); }
+  #detail { white-space: pre-wrap; font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px; color: var(--muted); max-height: 160px; overflow: auto; }
+  .diff-add { color: var(--accent); }
+  .diff-del { color: var(--danger); }
+  input[type=range] { width: 100%; }
+</style>
+</head>
+<body>
+<header>
+  <h1>锁序解剖室</h1>
+  <span>持有图 / 等待图 / 死锁环证据 / 事件校正分支 / 最小复现片段</span>
+</header>
+<main>
+  <section class="card">
+    <h2>采集代次与事件导入</h2>
+    <div class="row">
+      <label>代次</label><select id="genSel" onchange="refresh()"></select>
+      <input id="genLabel" placeholder="新代次标签，如 pid=4817 第3次采集">
+      <button onclick="newGen()">新建代次</button>
+    </div>
+    <div class="row muted">
+      每行一个 JSON：kind / thread / lock / ts / extra。
+      kind: thread_start, thread_end, acquire_request, acquire_success, release,
+      cond_wait, cond_notify, cond_notify_all, acquire_timeout
+    </div>
+    <textarea id="importer">{"kind":"thread_start","thread":"T1","ts":1}
+{"kind":"acquire_request","thread":"T1","lock":"0xA","ts":2}
+{"kind":"acquire_success","thread":"T1","lock":"0xA","ts":2}
+{"kind":"acquire_request","thread":"T2","lock":"0xB","ts":3}
+{"kind":"acquire_success","thread":"T2","lock":"0xB","ts":3}
+{"kind":"acquire_request","thread":"T1","lock":"0xB","ts":4}
+{"kind":"acquire_request","thread":"T2","lock":"0xA","ts":5}</textarea>
+    <div class="row">
+      <button onclick="appendEvents()">流式追加事件</button>
+      <span id="importMsg" class="muted"></span>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>分支与时间点</h2>
+    <div class="row">
+      <label>分支</label><select id="branchSel" onchange="refresh()"></select>
+      <label>比较</label><select id="branchSelB"></select>
+      <button onclick="doCompare()">比较两分支</button>
+    </div>
+    <div class="row">
+      <label>时间滑块</label>
+      <span id="uptoLabel" class="ev"></span>
+    </div>
+    <input type="range" id="slider" min="0" max="0" value="0" oninput="onSlide()">
+    <div class="row" style="margin-top:8px">
+      <button onclick="doMinimize()">缩减为最小复现片段</button>
+      <span id="minMsg" class="muted"></span>
+    </div>
+    <div id="detail"></div>
+  </section>
+
+  <section class="card wide">
+    <h2>线程泳道（按到达顺序，点击事件查看证据）</h2>
+    <svg id="swim" height="120"></svg>
+  </section>
+
+  <section class="card">
+    <h2>等待图（点击边查看产生它的事件）</h2>
+    <svg id="waitgraph" height="340"></svg>
+    <div id="conds" class="muted"></div>
+  </section>
+
+  <section class="card">
+    <h2>持有图</h2>
+    <div style="max-height:340px;overflow:auto">
+      <table id="heldTable">
+        <thead><tr><th>线程</th><th>锁</th><th>类型</th><th>计数/模式</th>
+        <th>acquire 事件栈</th><th>置信</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card wide">
+    <h2>环路证据（具体线程、锁、持有栈、等待栈）</h2>
+    <div id="cycles"></div>
+  </section>
+
+  <section class="card">
+    <h2>事件校正 / 锁类型声明 → 新分支</h2>
+    <div class="row">
+      <label>类型</label>
+      <select id="corrType">
+        <option value="event_patch">event_patch 修改事件</option>
+        <option value="event_drop">event_drop 删除事件</option>
+        <option value="event_insert">event_insert 插入事件</option>
+        <option value="lock_type">lock_type 锁类型声明</option>
+      </select>
+      <input id="corrName" placeholder="新分支名（可选）">
+    </div>
+    <textarea id="corrPayload">{"event_id": 1, "patch": {"lock": "0xC"}}</textarea>
+    <div class="row" style="margin-top:6px">
+      <button onclick="submitCorrection()">提交校正并创建分支</button>
+    </div>
+    <div class="muted">
+      patch/drop payload：{"event_id": 1, "patch": {"lock": "0xC"}}；
+      lock_type：{"lock": "0xA", "lock_type": "reentrant"}；
+      insert：{"after_event": 1, "event": {"kind": "release", "thread": "T1", "lock": "0xA"}}
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>异常与候选图置信状态</h2>
+    <div id="anomalies" style="max-height:200px;overflow:auto"></div>
+  </section>
+
+  <section class="card wide">
+    <h2>两分支比较</h2>
+    <div id="compare"></div>
+  </section>
+
+  <section class="card wide">
+    <h2>最小复现片段</h2>
+    <div id="minimized"></div>
+  </section>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>
