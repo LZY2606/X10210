@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>锁序解剖室</title>
+<style>
+  :root { --bg:#0f1420; --panel:#182034; --line:#2a3450; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: "SF Pro", "PingFang SC", sans-serif;
+         background:#0f1420; color:#dbe4f5; }
+  header { padding:14px 22px; background:#141b2e; border-bottom:1px solid #26304d;
+           display:flex; align-items:baseline; gap:14px; }
+  header h1 { font-size:20px; margin:0; color:#7fd0ff; }
+  header span { color:#8fa1c4; font-size:12px; }
+  .bar { display:flex; gap:10px; align-items:center; padding:10px 22px; flex-wrap:wrap;
+         background:#121828; border-bottom:1px solid #26304d; }
+  button, select { background:#1d2a45; color:#cfe0ff; border:1px solid #33436b;
+           border-radius:6px; padding:6px 12px; cursor:pointer; font-size:13px; }
+  button:hover { background:#27395e; }
+  input[type=range] { width:340px; }
+  .grid { display:grid; grid-template-columns: 1fr 1fr; gap:14px; padding:14px 22px; }
+  .card { background:#141b2e; border:1px solid #26304d; border-radius:10px; padding:12px; }
+  .card h2 { font-size:14px; margin:0 0 8px; color:#9db4dd; font-weight:600; }
+  .wide { grid-column: 1 / -1; }
+  svg { width:100%; display:block; }
+  .lane-label { font-size:11px; fill:#8fa1c4; }
+  .ev { stroke:#0f1420; stroke-width:1; }
+  .ev-req { fill:#f0b429; } .ev-acq { fill:#3fb950; } .ev-rel { fill:#58a6ff; }
+  .ev-cond { fill:#d2a8ff; } .ev-life { fill:#8fa1c4; }
+  .edge-confirmed { stroke:#ff7b72; stroke-width:2; }
+  .edge-candidate { stroke:#f0b429; stroke-width:2; stroke-dasharray:5 4; }
+  .hold-edge { stroke:#3fb950; stroke-width:1.6; }
+  .node { fill:#1d2a45; stroke:#4a5f8f; }
+  .node-text { fill:#dbe4f5; font-size:11px; text-anchor:middle; }
+  .edge-label { fill:#f0b429; font-size:10px; text-anchor:middle; }
+  .cycle { border:1px solid #6e3535; background:#241722; border-radius:8px;
+           padding:8px 10px; margin:6px 0; font-size:12px; }
+  .cycle b { color:#ff9d9a; }
+  .tag { display:inline-block; padding:1px 7px; border-radius:8px; font-size:11px; margin-left:6px; }
+  .tag-confirmed { background:#1f6f3d; color:#b8f5c8; }
+  .tag-candidate { background:#5c4a12; color:#ffd97a; }
+  pre { background:#0d1322; border:1px solid #26304d; border-radius:8px; padding:8px;
+        font-size:11px; max-height:260px; overflow:auto; white-space:pre-wrap; }
+  table { border-collapse:collapse; width:100%; font-size:12px; }
+  td, th { border:1px solid #26304d; padding:4px 8px; text-align:left; }
+  th { color:#9db4dd; }
+  #tlabel { color:#7fd0ff; font-size:13px; min-width:60px; }
+  .muted { color:#71809f; font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>锁序解剖室</h1>
+  <span>从线程事件复盘死锁与近失事件 · 持有图 / 等待图 / 环路证据 / 分支比较</span>
+</header>
+
+<div class="bar">
+  <button id="btn-demo">载入示例</button>
+  <label>分支 <select id="branch"></select></label>
+  <label>对比 <select id="branch-b"></select></label>
+  <button id="btn-compare">分支比较</button>
+  <label>时点 <input type="range" id="slider" min="0" max="100" value="100" step="1"></label>
+  <span id="tlabel">t=—</span>
+  <button id="btn-minimize">缩减复现环的最小片段</button>
+  <span class="muted" id="status"></span>
+</div>
+
+<div class="grid">
+  <div class="card wide"><h2>线程泳道</h2><svg id="lanes" height="120"></svg></div>
+  <div class="card"><h2>持有图（线程 → 锁）</h2><svg id="holdgraph" height="260"></svg></div>
+  <div class="card"><h2>等待图（线程 ⇢ 线程）</h2><svg id="waitgraph" height="260"></svg></div>
+  <div class="card"><h2>环路证据</h2><div id="cycles"><span class="muted">未检测到环</span></div></div>
+  <div class="card"><h2>异常与候选图</h2><div id="anomalies"><span class="muted">无</span></div></div>
+  <div class="card wide"><h2>分支比较 / 最小化结果</h2><div id="compare"><span class="muted">—</span></div></div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const NS = "http://www.w3.org/2000/svg";
+let timeline = null, branches = [], mainBranch = 1;
+
+function el(tag, attrs, parent) {
+  const n = document.createElementNS(NS, tag);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(n);
+  return n;
+}
+function text(tag, attrs, str, parent) {
+  const n = el(tag, attrs, parent); n.textContent = str; return n;
+}
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+  return r.json();
+}
+function say(msg) { $("status").textContent = msg; }
+
+async function refreshBranches() {
+  const d = await api("/api/branches");
+  branches = d.branches; mainBranch = d.main;
+  for (const sel of [$("branch"), $("branch-b")]) {
+    sel.innerHTML = "";
+    for (const b of branches) {
+      const o = document.createElement("option");
+      o.value = b.id; o.textContent = `#${b.id} ${b.name}`;
+      sel.appendChild(o);
+    }
+  }
+  $("branch-b").value = branches[branches.length - 1].id;
+}
+
+function currentT() {
+  if (!timeline) return null;
+  const span = timeline.t_max - timeline.t_min || 1;
+  return timeline.t_min + span * $("slider").value / 100;
+}
+
+async function loadTimeline() {
+  const b = $("branch").value;
+  timeline = await api(`/api/timeline?branch=${b}`);
+  drawLanes();
+}
+
+function drawLanes() {
+  const svg = $("lanes"); svg.innerHTML = "";
+  const {threads, events, t_min, t_max} = timeline;
+  const W = svg.clientWidth || 900, rowH = 26, pad = 70;
+  svg.setAttribute("height", Math.max(60, threads.length * rowH + 24));
+  const x = (ts) => pad + (W - pad - 20) * ((ts - t_min) / ((t_max - t_min) || 1));
+  threads.forEach((th, i) => {
+    const y = 20 + i * rowH;
+    text("text", {x: 6, y: y + 4, class: "lane-label"}, th, svg);
+    el("line", {x1: pad, y1: y, x2: W - 20, y2: y, stroke: "#26304d"}, svg);
+  });
+  const cls = {acquire_request: "ev-req", acquire: "ev-acq", release: "ev-rel",
+               cond_wait: "ev-cond", cond_notify: "ev-cond"};
+  for (const e of events) {
+    const i = threads.indexOf(e.thread);
+    if (i < 0) continue;
+    const y = 20 + i * rowH;
+    const c = el("circle", {cx: x(e.ts), cy: y, r: 5,
+      class: "ev " + (cls[e.type] || "ev-life")}, svg);
+    text("title", {}, `#${e.id} ${e.type} ${e.lock || ""} t=${e.ts}`, c);
+  }
+}
+
+function layout(nodes, W, H) {
+  const pos = {};
+  nodes.forEach((n, i) => {
+    const a = 2 * Math.PI * i / nodes.length - Math.PI / 2;
+    pos[n] = {x: W / 2 + Math.cos(a) * (W / 2 - 60),
+              y: H / 2 + Math.sin(a) * (H / 2 - 40)};
+  });
+  return pos;
+}
+
+function drawGraph(svgId, nodes, edges, edgeClass, labelFn) {
+  const svg = $(svgId); svg.innerHTML = "";
+  const W = svg.clientWidth || 420, H = +svg.getAttribute("height");
+  if (!nodes.length) { text("text", {x: 20, y: 30, class: "lane-label"}, "（空）", svg); return; }
+  const pos = layout(nodes, W, H);
+  for (const e of edges) {
+    const p = pos[e.from], q = pos[e.to];
+    if (!p || !q) continue;
+    const cls = e.confidence === "candidate" ? "edge-candidate" : edgeClass;
+    if (e.from === e.to) {
+      el("circle", {cx: p.x + 18, cy: p.y - 18, r: 12, fill: "none", class: cls}, svg);
+    } else {
+      el("line", {x1: p.x, y1: p.y, x2: q.x, y2: q.y, class: cls,
+                  "marker-end": "none"}, svg);
+      if (labelFn) {
+        text("text", {x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 - 4, class: "edge-label"},
+             labelFn(e), svg);
+      }
+    }
+  }
+  for (const n of nodes) {
+    el("circle", {cx: pos[n].x, cy: pos[n].y, r: 16, class: "node"}, svg);
+    text("text", {x: pos[n].x, y: pos[n].y + 4, class: "node-text"},
+         n.length > 10 ? n.slice(0, 9) + "…" : n, svg);
+  }
+}
+
+async function refreshGraph() {
+  if (!timeline) return;
+  const b = $("branch").value, t = currentT();
+  $("tlabel").textContent = "t=" + (t === null ? "—" : t.toFixed(0));
+  const g = await api(`/api/graph?branch=${b}&t=${t}`);
+  const holdNodes = [...new Set(g.holds.flatMap(h => [h.thread, h.lock]))];
+  drawGraph("holdgraph", holdNodes,
+            g.holds.map(h => ({from: h.thread, to: h.lock, confidence: h.confidence})),
+            "hold-edge", null);
+  const waitNodes = [...new Set(g.wait_for.flatMap(e => [e.from, e.to]))];
+  drawGraph("waitgraph", waitNodes, g.wait_for, "edge-confirmed", e => e.lock);
+
+  const cyc = $("cycles");
+  if (!g.cycles.length) {
+    cyc.innerHTML = '<span class="muted">未检测到环</span>';
+  } else {
+    cyc.innerHTML = "";
+    for (const c of g.cycles) {
+      const div = document.createElement("div");
+      div.className = "cycle";
+      let html = `<b>环 #${c.id}</b> 线程 ${c.threads.join(" → ")} → ${c.threads[0]}` +
+                 `<span class="tag tag-${c.confidence}">${c.confidence}</span><br>` +
+                 `锁：${c.locks.join(", ")}<br>`;
+      for (const th of c.threads) {
+        const d = c.detail[th];
+        const holds = d.holding.map(h =>
+          `${h.lock}×${h.count} (事件 ${h.events.join(",") || "?"})`).join("; ") || "无";
+        html += `· ${th} 等待 ${d.waiting_for.lock || "?"}（自事件 ` +
+                `${d.waiting_for.since_event}）｜持有栈：${holds}<br>`;
+      }
+      div.innerHTML = html;
+      cyc.appendChild(div);
+    }
+  }
+  const an = $("anomalies");
+  an.innerHTML = g.anomalies.length
+    ? g.anomalies.map(a =>
+        `<div>⚠ ${a.kind} 线程=${a.thread ?? "-"} 锁=${a.lock ?? "-"} ${a.detail || ""}</div>`)
+        .join("")
+    : '<span class="muted">无</span>';
+}
+
+async function compare() {
+  const a = $("branch").value, b = $("branch-b").value, t = currentT();
+  const d = await api(`/api/compare?a=${a}&b=${b}&t=${t ?? ""}`);
+  const box = $("compare");
+  let html = `<p>事件差异 ${d.event_diff.length} 处；仅 #${a} 的等待边 ` +
+             `${d.wait_only_a.length} 条；仅 #${b} 的等待边 ${d.wait_only_b.length} 条</p>`;
+  html += "<table><tr><th>(代次,序号)</th><th>变化</th></tr>" +
+    d.event_diff.map(x =>
+      `<tr><td>${x.key}</td><td><pre>${JSON.stringify(x.changed ?? {a: x.a, b: x.b}, null, 1)}</pre></td></tr>`
+    ).join("") + "</table>";
+  box.innerHTML = html;
+}
+
+async function doMinimize() {
+  const b = $("branch").value, t = currentT();
+  say("缩减中…");
+  try {
+    const d = await api("/api/minimize", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({branch: +b, t})});
+    $("compare").innerHTML =
+      `<p>目标环线程：${d.threads.join(", ")} —— 事件 ${d.original} → <b>${d.reduced}</b> 条，` +
+      `仍复现同一环（保持每线程配对与 condition 语义）</p>` +
+      `<pre>${d.events.map(e =>
+        `#${e.id} [代${e.epoch}#${e.seq}] t=${e.ts} ${e.thread ?? ""} ${e.type} ` +
+        `${e.lock ?? ""} ${e.cond ?? ""}`).join("\n")}</pre>`;
+    say("缩减完成");
+  } catch (err) { say("缩减失败：" + err.message); }
+}
+
+$("btn-demo").onclick = async () => {
+  await api("/api/demo", {method: "POST"});
+  await refreshBranches(); await loadTimeline(); await refreshGraph();
+  say("示例已载入");
+};
+$("branch").onchange = async () => { await loadTimeline(); await refreshGraph(); };
+$("slider").oninput = refreshGraph;
+$("btn-compare").onclick = compare;
+$("btn-minimize").onclick = doMinimize;
+
+(async () => {
+  await refreshBranches();
+  await loadTimeline();
+  await refreshGraph();
+})();
+</script>
+</body>
+</html>
